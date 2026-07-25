@@ -41,24 +41,11 @@ Set environment variables (see `.env.example`):
 
 ```bash
 docker build -t lyrion-mcp .
-docker run -p 8000:8000 -e LMS_HOST=your-lms-host lyrion-mcp
+docker run -d -p 8000:8000 -e LMS_HOST=your-lms-host lyrion-mcp
 ```
 
-For stdio mode (e.g. Claude Desktop subprocess):
-
-```json
-{
-  "mcpServers": {
-    "lyrion": {
-      "command": "docker",
-      "args": ["run", "-i", "--rm",
-        "-e", "LMS_HOST=your-lms-host",
-        "-e", "MCP_TRANSPORT=stdio",
-        "lyrion-mcp"]
-    }
-  }
-}
-```
+The server runs on `http://localhost:8000` using the `streamable-http`
+transport. Point your MCP client at that URL.
 
 ## Tools
 
