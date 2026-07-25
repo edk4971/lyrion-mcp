@@ -1,0 +1,4 @@
+pysqueezebox==0.14.0
+aiohttp==3.14.1
+mcp==1.28.1
+pytest==9.1.1
