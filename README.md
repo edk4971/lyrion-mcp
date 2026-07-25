@@ -88,7 +88,3 @@ python -m pyflakes client.py main.py tests/
 - Python 3.12+
 - A running Lyrion Music Server (9.x)
 - [Spotty plugin](https://github.com/michaelherger/Spotty-Plugin) (optional, for Spotify)
-
-## License
-
-MIT
