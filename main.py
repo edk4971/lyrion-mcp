@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Literal, Optional, cast
 
 from client import LMSClient
 from mcp.server.fastmcp import FastMCP
+from plugins import parse_plugin_list
 
 logging.basicConfig(level=logging.INFO)
 _LOGGER = logging.getLogger("lms-mcp")
@@ -13,6 +14,9 @@ LMS_PORT = int(os.getenv("LMS_PORT", "9000"))
 LMS_USERNAME = os.getenv("LMS_USERNAME", "") or None
 LMS_PASSWORD = os.getenv("LMS_PASSWORD", "") or None
 LMS_HTTPS = os.getenv("LMS_HTTPS", "").lower() in ("1", "true", "yes", "on")
+# Comma-separated list of streaming plugins to enable, e.g. "deezer,spotify".
+# Empty/omitted = all known plugins (spotify, deezer, tidal).
+LYRION_PLUGINS = parse_plugin_list(os.getenv("LYRION_PLUGINS", ""))
 
 mcp = FastMCP("LMS-Control")
 
@@ -22,6 +26,7 @@ client = LMSClient(
     username=LMS_USERNAME,
     password=LMS_PASSWORD,
     https=LMS_HTTPS,
+    plugins=LYRION_PLUGINS,
 )
 
 
@@ -52,12 +57,13 @@ async def play_media(
     player_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Play media. Provide exactly one source:
-    - url: stream or spotify:track:... link
+    - url: stream or service-native link (spotify://, deezer://, tidal://, ...)
     - track_id: local library track by numeric ID
-    - search_query: defaults to Spotify Artist Radio (~200 recommended
-      tracks). This is the right choice for "play Foo Fighters" or any
-      artist request. Pass radio=false ONLY if the user names a specific
-      song, e.g. "play Everlong by Foo Fighters" (plays one track then stops).
+    - search_query: defaults to the first enabled plugin's artist radio
+      (~200 recommended tracks). This is the right choice for "play Foo
+      Fighters" or any artist request. Pass radio=false ONLY if the user
+      names a specific song, e.g. "play Everlong by Foo Fighters" (plays one
+      track then stops).
     - album_id/artist_id/genre_id/playlist_id: play a collection by ID.
     player_id targets a specific player (default: first)."""
     try:
@@ -91,8 +97,9 @@ async def play_media(
 
 @mcp.tool()
 async def search_media(search_query: str, limit: int = 5) -> Dict[str, Any]:
-    """Search local library and Spotify (Spotty). Returns playable tracks
-    with title, url, and source. Use limit to cap results (default 5)."""
+    """Search local library and enabled streaming plugins (Spotify/Deezer/TIDAL).
+    Returns playable tracks with title, url, and source. Use limit to cap
+    results (default 5)."""
     try:
         results = await client.search_media(search_query)
         return {"results": results[:limit], "count": len(results)}

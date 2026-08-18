@@ -1,25 +1,12 @@
 import logging
-import re
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-from pysqueezebox import Server, Player
+from pysqueezebox import Server, Player  # type: ignore[import-untyped]
+
+from plugins import PluginRegistry
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _normalize_spotify_url(url: Optional[str]) -> Optional[str]:
-    """
-    Convert open.spotify.com share links to the native spotify:// URI that
-    LMS plays directly. Share links get 'exploded' by LMS, which causes
-    pysqueezebox's load confirmation to time out (false negative).
-    """
-    if not url:
-        return url
-    m = re.match(r"https?://open\.spotify\.com/(?:intl-\w+/)?(track|album|playlist|artist|show|episode)/([a-zA-Z0-9]+)", url)
-    if m:
-        return f"spotify://{m.group(1)}:{m.group(2)}"
-    return url
 
 
 class LMSClient:
@@ -35,6 +22,7 @@ class LMSClient:
         username: Optional[str] = None,
         password: Optional[str] = None,
         https: bool = False,
+        plugins: Optional[List[str]] = None,
     ):
         self.host = host
         self.port = port
@@ -45,6 +33,7 @@ class LMSClient:
         self.session: Optional[aiohttp.ClientSession] = None
         self.lms_server: Optional[Server] = None
         self.players: List[Player] = []
+        self.plugins: PluginRegistry = PluginRegistry(self, plugins)
 
     @property
     def connected(self) -> bool:
@@ -172,7 +161,7 @@ class LMSClient:
                 await target_player.async_set_power(True)
 
             if url:
-                return bool(await target_player.async_load_url(_normalize_spotify_url(url)))
+                return bool(await target_player.async_load_url(self.plugins.normalize_url(url)))
             if track_id is not None:
                 # LMS plays a library track by id via the playlistcontrol command.
                 # Use async_query (not async_command) because playlistcontrol returns
@@ -197,76 +186,30 @@ class LMSClient:
         self, search_query: str, player_id: Optional[str] = None
     ) -> bool:
         """
-        Play Spotify Artist Radio for the given search query. Navigates the
-        Spotty app menu to find the artist, then loads their radio (a
-        Spotify recommendations playlist of ~200 tracks).
+        Play an artist "radio" mix for the given search query. Delegates to
+        the first enabled streaming plugin that can build one (e.g. Spotify
+        Artist Radio, Deezer Smart Radio). Powers on the player first.
         """
         target_player = await self._get_player(player_id)
         pid = target_player.player_id
 
         try:
-            # Ensure powered on
             if not target_player.power:
                 await target_player.async_set_power(True)
-
-            # 1) Search spotty for the artist
-            search = await self.direct_rpc(
-                "spotty",
-                ["items", "0", "5", "item_id:1.0", f"search:{search_query}"],
-                player_id=pid,
-            )
-            # Find the "Artists" category link in search results
-            artists_cat = None
-            for item in (search or {}).get("loop_loop") or []:
-                if item.get("name") == "Artists":
-                    artists_cat = item.get("id")
-                    break
-            if not artists_cat:
-                _LOGGER.info("play_radio: no Artists category for %r", search_query)
-                return False
-
-            # 2) Drill into Artists to get the first artist
-            artists = await self.direct_rpc(
-                "spotty", ["items", "0", "3", f"item_id:{artists_cat}"], player_id=pid
-            )
-            first_artist = ((artists or {}).get("loop_loop") or [None])[0]
-            if not first_artist:
-                _LOGGER.info("play_radio: no artists found for %r", search_query)
-                return False
-            artist_id = first_artist.get("id")
-
-            # 3) Drill into the artist to find "Artist Radio" (item_id ends with .4)
-            detail = await self.direct_rpc(
-                "spotty", ["items", "0", "10", f"item_id:{artist_id}"], player_id=pid
-            )
-            radio_id = None
-            for item in (detail or {}).get("loop_loop") or []:
-                if "radio" in (item.get("name") or "").lower():
-                    radio_id = item.get("id")
-                    break
-            if not radio_id:
-                _LOGGER.info("play_radio: no radio option for artist %r", first_artist.get("name"))
-                return False
-
-            # 4) Play the radio — loads ~200 recommended tracks
-            await self.direct_rpc(
-                "spotty", ["playlist", "play", f"item_id:{radio_id}"], player_id=pid
-            )
-            _LOGGER.info(
-                "play_radio: started artist radio for %r", first_artist.get("name")
-            )
-            return True
+            return await self.plugins.play_radio(search_query, pid)
         except Exception as e:
             _LOGGER.error("Error in play_radio: %s", e)
             return False
 
     async def search_media(self, search_query: str) -> List[Dict[str, Any]]:
         """
-        Search both the local LMS library and the Spotty (Spotify) app for
-        playable tracks matching ``search_query``.
+        Search the local LMS library plus all enabled streaming plugins
+        (Spotify/Spotty, Deezer, TIDAL, ...) for playable tracks matching
+        ``search_query``.
 
         Returns a list of dicts with keys: title, url, source ('library' or
-        'spotify'). Local library results are listed first.
+        a plugin name such as 'spotify'/'deezer'). Local library results are
+        listed first.
         """
         await self.ensure_connected()
         results: List[Dict[str, Any]] = []
@@ -287,29 +230,22 @@ class LMSClient:
                     }
                 )
 
-        # 2) Spotty (Spotify) app search — requires a player context
-        if self.players:
-            player_id = self.players[0].player_id
-            spotty = await self.direct_rpc(
-                "spotty",
-                ["items", "0", "20", "item_id:1.0", f"search:{search_query}", "want_url:1"],
-                player_id=player_id,
-            )
-            for item in (spotty or {}).get("loop_loop") or []:
-                # Skip non-audio category links (Artists, Albums, Playlists, etc.)
-                if not item.get("isaudio"):
-                    continue
-                url = item.get("url")
-                if url:
-                    results.append(
-                        {
-                            "title": item.get("name", ""),
-                            "url": url,
-                            "source": "spotify",
-                        }
-                    )
+        # 2) Streaming plugin searches — require a player context
+        player_id = await self._first_player_id()
+        if player_id:
+            results.extend(await self.plugins.search_tracks(search_query, player_id))
 
         return results
+
+    async def _first_player_id(self) -> Optional[str]:
+        """Return a usable player id for LMS app menu calls."""
+        if self.players:
+            return self.players[0].player_id
+        status = await self.direct_rpc("serverstatus", ["0", "50"])
+        for player in (status or {}).get("players_loop") or []:
+            if isinstance(player, dict) and player.get("playerid"):
+                return str(player["playerid"])
+        return None
 
     async def _search_media(
         self, search_query: str, player: Player
@@ -394,11 +330,11 @@ class LMSClient:
 
         if action == "add":
             return await self.direct_rpc(
-                "playlist", ["add", _normalize_spotify_url(url)], player_id=player_id
+                "playlist", ["add", self.plugins.normalize_url(url)], player_id=player_id
             )
         if action == "insert":
             return await self.direct_rpc(
-                "playlist", ["insert", _normalize_spotify_url(url)], player_id=player_id
+                "playlist", ["insert", self.plugins.normalize_url(url)], player_id=player_id
             )
         if action == "delete":
             return await self.direct_rpc(

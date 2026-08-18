@@ -4,14 +4,16 @@ This project is an MCP (Model Context Protocol) server that allows LLMs to contr
 
 ## Project Structure
 - `client.py`: High-level `LMSClient` class wrapping `pysqueezebox` and direct JSON-RPC calls.
+- `plugins.py`: Streaming-service plugin adapters (`SpotifyPlugin`, `DeezerPlugin`,
+  `TidalPlugin`) + `PluginRegistry`. Driven by `LYRION_PLUGINS`.
 - `main.py`: FastMCP server implementation mapping `LMSClient` methods to MCP tools.
 - `requirements.txt`: Project dependencies.
 - `Dockerfile`: Docker configuration.
 
 ## Key Functionalities (9 MCP tools, optimized for context efficiency)
 - `get_status`: System topology (all players) or now-playing info (with player_id).
-- `play_media`: Play by URL, track_id, search_query, or collection ID (album/artist/genre/playlist).
-- `search_media`: Search local library + Spotify (Spotty). Returns minimal title/url/source.
+- `play_media`: Play by URL, track_id, search_query, or collection ID (album/artist/genre/playlist). Search defaults to the first enabled plugin's artist radio.
+- `search_media`: Search local library + all enabled streaming plugins. Returns minimal title/url/source.
 - `control_playback`: Pause, stop, play (resume), seek, power_on, power_off.
 - `manage_playlist`: Add, insert, delete, clear, move, jump, or save the current playlist.
 - `set_player`: Volume (0-100), shuffle (0/1/2), repeat (0/1/2), mute (toggle or explicit).
@@ -54,8 +56,11 @@ This project is an MCP (Model Context Protocol) server that allows LLMs to contr
 - Total tool definition overhead: ~1,400 tokens (down from ~2,335).
 
 ## Instructions for Agents
-- Use `client.py` for all LMS interactions.
+- Use `client.py` for all LMS interactions. Plugin-specific behavior lives in
+  `plugins.py`; add a new `StreamingPlugin` subclass + register it in
+  `_KNOWN_PLUGINS` to support another service.
 - Ensure error messages are descriptive to help the LLM correct its behavior.
 - Follow the existing patterns in `LMSClient` for adding new features.
-- Run `python -m pytest -q` for tests and `python -m mypy client.py main.py`
-  for type checking. `pysqueezebox` has no type stubs (import-untyped note is expected).
+- Run `python -m pytest -q` for tests and `python -m mypy client.py main.py
+  plugins.py` for type checking. `pysqueezebox` has no type stubs
+  (import-untyped note is expected).

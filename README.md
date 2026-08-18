@@ -6,8 +6,9 @@ An [MCP](https://modelcontextprotocol.io/) server that lets LLMs control a
 ## Features
 
 - **9 MCP tools** (optimized for context efficiency — ~1,400 tokens of definition overhead)
-- Play by URL, track ID, search, collection ID, or Spotify Artist Radio
-- Search across local library + Spotify (via the Spotty plugin)
+- Play by URL, track ID, search, collection ID, or Artist Radio
+- Search across local library + streaming plugins (Spotify/Spotty, Deezer, TIDAL)
+- Pluggable streaming-service adapters, configured via `LYRION_PLUGINS`
 - Full playback control: pause, stop, seek, power on/off
 - Playlist management: add, insert, delete, clear, move, jump, save
 - Player settings: volume, shuffle, repeat, mute
@@ -33,6 +34,7 @@ Set environment variables (see `.env.example`):
 | `LMS_USERNAME` | (none) | LMS username (if auth enabled) |
 | `LMS_PASSWORD` | (none) | LMS password (if auth enabled) |
 | `LMS_HTTPS` | off | Set `1` if LMS uses HTTPS |
+| `LYRION_PLUGINS` | (all) | Comma-separated streaming plugins to enable (`spotify`, `deezer`, `tidal`) |
 | `MCP_TRANSPORT` | `stdio` | `stdio`, `sse`, or `streamable-http` |
 | `MCP_HOST` | `0.0.0.0` | Bind address (HTTP transports) |
 | `MCP_PORT` | `8000` | Port (HTTP transports) |
@@ -65,13 +67,16 @@ transport. Point your MCP client at that URL.
 
 ```bash
 pip install -r requirements.txt
-python -m pytest -q          # 110 tests
-python -m mypy client.py main.py
-python -m pyflakes client.py main.py tests/
+python -m pytest -q          # unit tests
+python -m mypy client.py main.py plugins.py
+python -m pyflakes client.py main.py plugins.py tests/
 ```
 
 ## Requirements
 
 - Python 3.12+
 - A running Lyrion Music Server (9.x)
-- [Spotty plugin](https://github.com/michaelherger/Spotty-Plugin) (optional, for Spotify)
+- One or more streaming plugins (all optional):
+  - [Spotty plugin](https://github.com/michaelherger/Spotty-Plugin) (Spotify)
+  - [lms-deezer](https://github.com/Philippe44/lms-deezer) (Deezer)
+  - TIDAL plugin (TIDAL)
