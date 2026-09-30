@@ -3,7 +3,7 @@ import os
 from typing import Any, Dict, List, Literal, Optional, cast
 
 from client import LMSClient
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from plugins import parse_plugin_list
 
 logging.basicConfig(level=logging.INFO)
@@ -18,7 +18,7 @@ LMS_HTTPS = os.getenv("LMS_HTTPS", "").lower() in ("1", "true", "yes", "on")
 # Empty/omitted = all known plugins (spotify, deezer, tidal).
 LYRION_PLUGINS = parse_plugin_list(os.getenv("LYRION_PLUGINS", ""))
 
-mcp = FastMCP("LMS-Control")
+mcp = MCPServer("LMS-Control")
 
 client = LMSClient(
     host=LMS_HOST,
@@ -248,23 +248,22 @@ async def query_lms(
         return {"success": False, "error": str(e)}
 
 
-def _configure_transport() -> Literal["stdio", "sse", "streamable-http"]:
+def _configure_transport():
     transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
     allowed: tuple[Literal["stdio", "sse", "streamable-http"], ...] = (
         "stdio", "sse", "streamable-http",
     )
     if transport not in allowed:
         raise ValueError(f"Unsupported MCP_TRANSPORT={transport!r}")
-    if transport in ("sse", "streamable-http"):
-        mcp.settings.host = os.getenv("MCP_HOST", "0.0.0.0")
-        mcp.settings.port = int(os.getenv("MCP_PORT", "8000"))
-        security = mcp.settings.transport_security
-        if security is not None:
-            security.enable_dns_rebinding_protection = False
-    return cast(Literal["stdio", "sse", "streamable-http"], transport)
+    host = os.getenv("MCP_HOST", "0.0.0.0")
+    port = int(os.getenv("MCP_PORT", "8000"))
+    return cast(Literal["stdio", "sse", "streamable-http"], transport), host, port
 
 
 if __name__ == "__main__":
-    transport = _configure_transport()
+    transport, host, port = _configure_transport()
     _LOGGER.info("Starting LMS-Control MCP server (transport=%s)", transport)
-    mcp.run(transport=transport)
+    if transport in ("sse", "streamable-http"):
+        mcp.run(transport=transport, host=host, port=port)
+    else:
+        mcp.run(transport=transport)
